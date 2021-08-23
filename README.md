@@ -16,3 +16,9 @@ go get -u github.com/vodafon/waybackrobots
 ```
 waybackrobots -d target.com
 ```
+
+And you can use the `-raw` flag to print the robots files as-is.
+
+```
+waybackrobots -d target.com -raw
+```

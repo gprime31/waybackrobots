@@ -19,6 +19,7 @@ import (
 var (
 	flagDomain = flag.String("d", "", "target domain")
 	flagProcs  = flag.Int("c", 10, "concurrency")
+	flagRaw    = flag.Bool("raw", false, "raw lines, not only disallowed")
 
 	listFormat     = "https://web.archive.org/cdx/search/cdx?url=%s/robots.txt&output=json&fl=timestamp,original&filter=statuscode:200&collapse=digest"
 	snapshotFormat = "https://web.archive.org/web/%sif_/%s"
@@ -27,27 +28,28 @@ var (
 type Uniq struct {
 	sync.Mutex
 	mp map[string]struct{}
-	w  io.Writer
 }
 
-func (obj *Uniq) printUniq(el string) {
-	obj.Lock()
-	defer obj.Unlock()
+func (obj *Worker) printUniq(el string) {
+	obj.um.Lock()
+	defer obj.um.Unlock()
 
-	if _, ok := obj.mp[el]; ok {
+	if _, ok := obj.um.mp[el]; ok {
 		return
 	}
 
-	obj.mp[el] = struct{}{}
+	obj.um.mp[el] = struct{}{}
 
 	fmt.Fprintln(obj.w, el)
 }
 
 type Worker struct {
-	wg   *sync.WaitGroup
-	rowC chan [2]string
-	um   *Uniq
-	cl   client
+	wg       *sync.WaitGroup
+	rowC     chan [2]string
+	um       *Uniq
+	cl       client
+	w        io.Writer
+	rawLines bool
 }
 
 func (w Worker) Do() {
@@ -70,7 +72,7 @@ func main() {
 	}
 
 	cl := client{&http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 30 * time.Second,
 	}}
 
 	list := listSnapshots(cl)
@@ -81,7 +83,7 @@ func main() {
 
 	log.Printf("Found %d files\n", len(list))
 
-	processSnapshots(list, cl)
+	processSnapshots(list, cl, *flagRaw)
 }
 
 func (w Worker) processRow(row [2]string) {
@@ -94,9 +96,22 @@ func (w Worker) processRow(row [2]string) {
 	}
 	defer resp.Body.Close()
 
-	scanner := bufio.NewScanner(resp.Body)
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Read body from %q error: %v", u, err)
+	}
+	if isInvalidResponse(strings.TrimSpace(strings.ToLower(string(data)))) {
+		return
+	}
+
+	scanner := bufio.NewScanner(bytes.NewBuffer(data))
 	for scanner.Scan() {
 		line := scanner.Text()
+		if w.rawLines {
+			fmt.Fprintln(w.w, line)
+			continue
+		}
+
 		if !strings.HasPrefix(strings.ToLower(line), "disallow:") {
 			continue
 		}
@@ -106,24 +121,37 @@ func (w Worker) processRow(row [2]string) {
 			continue
 		}
 
-		w.um.printUniq(pat)
+		w.printUniq(pat)
 	}
 }
 
-func processSnapshots(list [][2]string, cl client) {
+func isInvalidResponse(dataLow string) bool {
+	// HTML
+	if strings.Contains(dataLow, "<!doctype ") || strings.Contains(dataLow, "<html ") || strings.Contains(dataLow, "<body ") {
+		return true
+	}
+	// JSON
+	if (strings.HasPrefix(dataLow, "{") && strings.HasSuffix(dataLow, "}")) || (strings.HasPrefix(dataLow, "[") && strings.HasSuffix(dataLow, "]")) {
+		return true
+	}
+	return false
+}
+
+func processSnapshots(list [][2]string, cl client, rawLines bool) {
 	wg := &sync.WaitGroup{}
 	rowC := make(chan [2]string, *flagProcs)
 	uniq := &Uniq{
 		mp: make(map[string]struct{}),
-		w:  os.Stdout,
 	}
 
 	for i := 0; i < *flagProcs; i++ {
 		go Worker{
-			wg:   wg,
-			rowC: rowC,
-			um:   uniq,
-			cl:   cl,
+			wg:       wg,
+			rowC:     rowC,
+			um:       uniq,
+			cl:       cl,
+			w:        os.Stdout,
+			rawLines: rawLines,
 		}.Do()
 	}
 

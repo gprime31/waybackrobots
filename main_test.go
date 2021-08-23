@@ -43,7 +43,7 @@ func TestList(t *testing.T) {
 	}
 }
 
-func TestWorkerDo(t *testing.T) {
+func TestWorkerDoDisallowed(t *testing.T) {
 	tests := []struct {
 		name string
 		p    string
@@ -62,7 +62,6 @@ func TestWorkerDo(t *testing.T) {
 		w := bytes.NewBuffer([]byte{})
 		uniq := &Uniq{
 			mp: make(map[string]struct{}),
-			w:  w,
 		}
 
 		go Worker{
@@ -70,6 +69,7 @@ func TestWorkerDo(t *testing.T) {
 			rowC: rowC,
 			um:   uniq,
 			cl:   cl,
+			w:    w,
 		}.Do()
 
 		wg.Add(1)
@@ -80,6 +80,48 @@ func TestWorkerDo(t *testing.T) {
 		res := w.String()
 		if tt.exp != res {
 			t.Errorf("%s: Incorrect result. Expected %q, got %q\n", tt.name, tt.exp, res)
+		}
+	}
+}
+
+func TestWorkerDoRaw(t *testing.T) {
+	tests := []struct {
+		p string
+	}{
+		{"./testdata/robots1.txt"},
+		{"./testdata/robots2.txt"},
+		{"./testdata/robots2.txt"},
+	}
+	for _, tt := range tests {
+		content := readFile(tt.p)
+		cl := client{newTestClient(content)}
+
+		wg := &sync.WaitGroup{}
+		rowC := make(chan [2]string, 1)
+
+		w := bytes.NewBuffer([]byte{})
+		uniq := &Uniq{
+			mp: make(map[string]struct{}),
+		}
+
+		go Worker{
+			wg:       wg,
+			rowC:     rowC,
+			um:       uniq,
+			cl:       cl,
+			w:        w,
+			rawLines: true,
+		}.Do()
+
+		wg.Add(1)
+
+		rowC <- [2]string{"20070702231826", "http://example.com/robots.txt"}
+		close(rowC)
+		wg.Wait()
+		res := w.String()
+		exp := string(content)
+		if exp != res {
+			t.Errorf("%s: Incorrect result. Expected %q, got %q\n", tt.p, exp, res)
 		}
 	}
 }
