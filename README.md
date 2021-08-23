@@ -8,6 +8,12 @@ Inspired by [mhmdiaa/waybackrobots.py](https://gist.github.com/mhmdiaa/2742c5e14
 ## Installation
 
 ```
+go install github.com/vodafon/waybackrobots@latest
+```
+
+Or
+
+```
 go get -u github.com/vodafon/waybackrobots
 ```
 
