@@ -127,7 +127,7 @@ func (w Worker) processRow(row [2]string) {
 
 func isInvalidResponse(dataLow string) bool {
 	// HTML
-	if strings.Contains(dataLow, "<!doctype ") || strings.Contains(dataLow, "<html ") || strings.Contains(dataLow, "<body ") {
+	if strings.Contains(dataLow, "<!doctype ") || strings.Contains(dataLow, "<html") || strings.Contains(dataLow, "<body") {
 		return true
 	}
 	// JSON
