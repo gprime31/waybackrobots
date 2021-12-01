@@ -18,7 +18,7 @@ import (
 
 var (
 	flagDomain = flag.String("d", "", "target domain")
-	flagProcs  = flag.Int("c", 10, "concurrency")
+	flagProcs  = flag.Int("c", 4, "concurrency")
 	flagRaw    = flag.Bool("raw", false, "raw lines, not only disallowed")
 
 	listFormat     = "https://web.archive.org/cdx/search/cdx?url=%s/robots.txt&output=json&fl=timestamp,original&filter=statuscode:200&collapse=digest"
@@ -91,15 +91,21 @@ func (w Worker) processRow(row [2]string) {
 
 	resp, err := w.cl.Get(u)
 	if err != nil {
-		log.Printf("WARN: fetch snapshot for %s error: %s", row, err)
+		log.Printf("[Process] WARN: fetch snapshot for %s error: %s", row, err)
 		return
 	}
 	defer resp.Body.Close()
 
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalf("Read body from %q error: %v", u, err)
+	buf := make([]byte, 1024*4) // 4Mb
+	n, err := resp.Body.Read(buf)
+	if err != nil && err != io.EOF {
+		if strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("[Process] WARN: read snapshot for %s error: %s", row, err)
+			return
+		}
+		log.Fatalf("[Process] Read body from %q error: %v", u, err)
 	}
+	data := buf[:n]
 	if isInvalidResponse(strings.TrimSpace(strings.ToLower(string(data)))) {
 		return
 	}
@@ -170,7 +176,7 @@ func listSnapshots(cl client) [][2]string {
 
 	resp, err := cl.Get(u)
 	if err != nil {
-		log.Fatalf("GET %q error: %v", u, err)
+		log.Fatalf("[List] GET %q error: %v", u, err)
 	}
 
 	defer resp.Body.Close()
@@ -178,7 +184,7 @@ func listSnapshots(cl client) [][2]string {
 	res := [][2]string{}
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Read body from %q error: %v", u, err)
+		log.Fatalf("[List] Read body from %q error: %v", u, err)
 	}
 
 	if resp.StatusCode == 403 && bytes.Contains(data, []byte("AdministrativeAccessControlException: Blocked Site Error")) {
@@ -187,7 +193,7 @@ func listSnapshots(cl client) [][2]string {
 
 	err = json.Unmarshal(data, &res)
 	if err != nil {
-		log.Fatalf("%q: JSON decode for %q error: %v", u, data, err)
+		log.Fatalf("[List] %q: JSON decode for %q error: %v", u, data, err)
 	}
 
 	if len(res) < 2 {
